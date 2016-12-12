@@ -2,6 +2,8 @@ package main
 
 import (
 	"database/sql"
+	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"os"
@@ -13,7 +15,6 @@ import (
 
 	"github.com/jaybeecave/render"
 	dotenv "github.com/joho/godotenv"
-	log "github.com/mgutz/logxi/v1"
 	"github.com/urfave/cli"
 )
 
@@ -33,8 +34,23 @@ func main() {
 				return createTable(c, render, db)
 			},
 		},
+		{
+			Name:    "fields",
+			Aliases: []string{"f"},
+			Usage:   "Add fields to an existing table [tablename] [fieldname:fieldtype]",
+			Action: func(c *cli.Context) error {
+				return addFields(c, render, db)
+			},
+		},
+		{
+			Name:    "migration",
+			Aliases: []string{"m"},
+			Usage:   "perform schema migration",
+			Action: func(c *cli.Context) error {
+				return doMigration(c, render, db)
+			},
+		},
 	}
-
 	app.Run(os.Args)
 }
 
@@ -56,7 +72,7 @@ func getDBConnection() *runner.DB {
 	username := u.User.Username()
 	pass, isPassSet := u.User.Password()
 	if !isPassSet {
-		log.Error("no database password")
+		panic("no database password")
 	}
 	host, port, _ := net.SplitHostPort(u.Host)
 	dbName := strings.Replace(u.Path, "/", "", 1)
@@ -66,7 +82,7 @@ func getDBConnection() *runner.DB {
 	if err != nil {
 		panic(err)
 	}
-	log.Info("database running")
+
 	// ensures the database can be pinged with an exponential backoff (15 min)
 	runner.MustPing(db)
 
@@ -86,4 +102,60 @@ func getDBConnection() *runner.DB {
 
 	// db connection
 	return runner.NewDB(db, "postgres")
+}
+
+// for storing variables when running the templates
+type viewBucket struct {
+	Data map[string]interface{}
+}
+
+func newViewBucket() *viewBucket {
+	return &viewBucket{Data: map[string]interface{}{}}
+}
+
+func (viewBucket *viewBucket) add(key string, value interface{}) {
+	viewBucket.Data[key] = value
+}
+
+func (viewBucket *viewBucket) getStrSafe(key string) (string, error) {
+	val := viewBucket.Data[key]
+	if val == nil {
+		return "", errors.New("could not find " + key)
+	}
+	strVal, ok := val.(string)
+	if !ok {
+		return "", errors.New("could not cast " + key + " to string")
+	}
+	return strVal, nil
+}
+
+// getStr - returns a string for the provided key. Will panic if key not found
+func (viewBucket *viewBucket) getStr(key string) string {
+	val, err := viewBucket.getStrSafe(key)
+	if err != nil {
+		panic(err)
+	}
+	return val
+}
+
+func (viewBucket *viewBucket) addFieldDataFromContext(c *cli.Context) {
+	args := c.Args()
+	viewBucket.add("TableName", args.First())
+
+	fields := Fields{}
+	for _, arg := range args {
+		fmt.Printf(arg)
+		if args.First() == arg {
+			continue // we dont care about the first arg as its the TableName
+		}
+		if strings.Contains(arg, ":") {
+			strSlice := strings.Split(arg, ":")
+			field := Field{
+				FieldName: strSlice[0],
+				FieldType: strSlice[1],
+			}
+			fields = append(fields, field)
+		}
+	}
+	viewBucket.add("Fields", fields)
 }

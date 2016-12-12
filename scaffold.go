@@ -12,14 +12,11 @@ import (
 	"os"
 
 	"github.com/jaybeecave/render"
+	errors "github.com/kataras/go-errors"
 	_ "github.com/mattes/migrate/driver/postgres" //for migrations
 	"github.com/mattes/migrate/file"
 	"github.com/mattes/migrate/migrate"
 	"github.com/urfave/cli"
-
-	"fmt"
-
-	"strings"
 
 	runner "gopkg.in/mgutz/dat.v1/sqlx-runner"
 )
@@ -64,24 +61,7 @@ func createTable(c *cli.Context, r *render.Render, db *runner.DB) error {
 	}
 
 	// add variables for template
-	bucket.add("TableName", args.First())
-
-	fields := Fields{}
-	for _, arg := range args {
-		fmt.Printf(arg)
-		if args.First() == arg {
-			continue // we dont care about the first arg as its the TableName
-		}
-		if strings.Contains(arg, ":") {
-			strSlice := strings.Split(arg, ":")
-			field := Field{
-				FieldName: strSlice[0],
-				FieldType: strSlice[1],
-			}
-			fields = append(fields, field)
-		}
-	}
-	bucket.add("Fields", fields)
+	bucket.addFieldDataFromContext(c)
 
 	file, err := migrate.Create(os.Getenv("DATABASE_URL")+"?sslmode=disable", "./models/migrations", "create_"+bucket.getStr("TableName"))
 	if err != nil {
@@ -96,6 +76,46 @@ func createTable(c *cli.Context, r *render.Render, db *runner.DB) error {
 	if err != nil {
 		// render.JSON(w, http.StatusInternalServerError, err.Error())
 		return cli.NewExitError(err.Error(), 1)
+	}
+	return nil
+}
+
+func addFields(c *cli.Context, r *render.Render, db *runner.DB) error {
+	// setup
+	bucket := newViewBucket()
+	if !c.Args().Present() {
+		// no args
+		return cli.NewExitError("ERROR: No tablename defined", 1)
+	}
+
+	// add variables for template
+	bucket.addFieldDataFromContext(c)
+
+	file, err := migrate.Create(os.Getenv("DATABASE_URL")+"?sslmode=disable", "./models/migrations", "fields_"+bucket.getStr("TableName"))
+	if err != nil {
+		return cli.NewExitError(err.Error(), 1)
+	}
+	err = fromTemplate(r, "add-fields", file.UpFile, bucket)
+	if err != nil {
+		// render.JSON(w, http.StatusInternalServerError, err.Error())
+		return cli.NewExitError(err.Error(), 1)
+	}
+	err = fromTemplate(r, "remove-fields", file.DownFile, bucket)
+	if err != nil {
+		// render.JSON(w, http.StatusInternalServerError, err.Error())
+		return cli.NewExitError(err.Error(), 1)
+	}
+	return nil
+}
+
+func doMigration(c *cli.Context, r *render.Render, db *runner.DB) error {
+	errs, ok := migrate.UpSync(os.Getenv("DATABASE_URL")+"?sslmode=disable", "./models/migrations")
+	finalError := ""
+	if !ok {
+		for _, err := range errs {
+			finalError += err.Error() + "\n"
+		}
+		return errors.New(finalError)
 	}
 	return nil
 }

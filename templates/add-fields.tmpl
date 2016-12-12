@@ -1,0 +1,2 @@
+{{range $field := .Data.Fields}}" ALTER TABLE "{{.Data.TableName}}" ADD COLUMN {{$field.FieldName}}" {{$field.FieldType}}; {{end}}
+
