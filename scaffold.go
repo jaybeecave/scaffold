@@ -1,6 +1,7 @@
 package main
 
 import (
+	"html/template"
 	"net/http"
 
 	"bytes"
@@ -18,6 +19,9 @@ import (
 	"github.com/mattes/migrate/migrate"
 	"github.com/urfave/cli"
 
+	"strings"
+
+	"github.com/serenize/snaker"
 	runner "gopkg.in/mgutz/dat.v1/sqlx-runner"
 )
 
@@ -67,14 +71,12 @@ func createTable(c *cli.Context, r *render.Render, db *runner.DB) error {
 	if err != nil {
 		return cli.NewExitError(err.Error(), 1)
 	}
-	err = fromTemplate(r, "create-table", file.UpFile, bucket)
+	err = migrationFromTemplate(r, "create-table", file.UpFile, bucket)
 	if err != nil {
-		// render.JSON(w, http.StatusInternalServerError, err.Error())
 		return cli.NewExitError(err.Error(), 1)
 	}
-	err = fromTemplate(r, "drop-table", file.DownFile, bucket)
+	err = migrationFromTemplate(r, "drop-table", file.DownFile, bucket)
 	if err != nil {
-		// render.JSON(w, http.StatusInternalServerError, err.Error())
 		return cli.NewExitError(err.Error(), 1)
 	}
 	return nil
@@ -95,14 +97,12 @@ func addFields(c *cli.Context, r *render.Render, db *runner.DB) error {
 	if err != nil {
 		return cli.NewExitError(err.Error(), 1)
 	}
-	err = fromTemplate(r, "add-fields", file.UpFile, bucket)
+	err = migrationFromTemplate(r, "add-fields", file.UpFile, bucket)
 	if err != nil {
-		// render.JSON(w, http.StatusInternalServerError, err.Error())
 		return cli.NewExitError(err.Error(), 1)
 	}
-	err = fromTemplate(r, "remove-fields", file.DownFile, bucket)
+	err = migrationFromTemplate(r, "remove-fields", file.DownFile, bucket)
 	if err != nil {
-		// render.JSON(w, http.StatusInternalServerError, err.Error())
 		return cli.NewExitError(err.Error(), 1)
 	}
 	return nil
@@ -120,7 +120,108 @@ func doMigration(c *cli.Context, r *render.Render, db *runner.DB) error {
 	return nil
 }
 
-func fromTemplate(r *render.Render, templateName string, file *file.File, data *viewBucket) error {
+func createModel(c *cli.Context, r *render.Render, db *runner.DB) error {
+	bucket := newViewBucket()
+	args := c.Args()
+
+	if !args.Present() {
+		// no args
+		return cli.NewExitError("ERROR: No tablename defined", 1)
+	}
+	// add variables for template
+	bucket.addFieldDataFromContext(c)
+
+	// populate variables
+	tableName := bucket.getStr("TableName")
+	tableNameTitle := snaker.SnakeToCamel(tableName)
+	letters := strings.Split(tableNameTitle, "")
+	letters[0] = strings.ToLower(letters[0])
+	tableNameCamel := strings.Join(letters, "")
+	tableID := tableName + "_id"
+
+	tnJnt := strings.Join(strings.Split(tableName, "_"), " ")
+
+	bucket.add("TableNameSpaces", tnJnt)
+	bucket.add("TableNameTitle", tableNameTitle)
+	bucket.add("TableNameCamel", tableNameCamel)
+	bucket.add("TableID", tableID)
+
+	// populate more variables from column names
+	columns := []*ColumnInfo{}
+	err := db.Select("column_name, data_type, is_nullable").
+		From("information_schema.columns").
+		Where("table_schema = $1 and table_name = $2", "public", tableName).
+		QueryStructs(&columns)
+	if err != nil {
+		return cli.NewExitError(err.Error(), 1)
+	}
+	colsDBConcat := `"`
+	colsRecordPrefixedConcat := ""
+	for i, col := range columns {
+		if col.ColumnName == tableID {
+			// we never want to include the table_id where these values are used because id's get generated from the database
+			continue
+		}
+		colsDBConcat += col.ColumnName + `"`
+		colsRecordPrefixedConcat += "record." + col.ColumnNameTitle()
+		if i != (len(columns) - 1) {
+			colsDBConcat += `, "`
+			colsRecordPrefixedConcat += ", "
+		}
+	}
+	bucket.add("Columns", columns)
+	bucket.add("ColumnsDBStrings", template.HTML(colsDBConcat))
+	bucket.add("ColumnsRecordPrefixedStrings", colsRecordPrefixedConcat)
+
+	//
+	fo, _ := os.Create("./models/" + tableNameCamel + ".go.tmp")
+
+	template := r.TemplateLookup("create-model")
+	wr := bufio.NewWriter(fo)
+	err = template.Execute(wr, bucket.Data)
+	if err != nil {
+		return err
+	}
+	wr.Flush()
+	// err = ioutil.WriteFile("./models/migrations/"+tableName+".go", buffer.Bytes(), os.ModePerm)
+	if err != nil {
+		return cli.NewExitError(err.Error(), 1)
+	}
+
+	if err := fo.Close(); err != nil {
+		return cli.NewExitError(err.Error(), 1)
+	}
+	return nil
+}
+
+type ColumnInfo struct {
+	ColumnName string `db:"column_name"`
+	DataType   string `db:"data_type"`
+	IsNullable string `db:"is_nullable"`
+}
+
+func (colInfo *ColumnInfo) IsNullField() bool {
+	return colInfo.IsNullable == "YES"
+}
+
+func (colInfo *ColumnInfo) ColumnNameTitle() string {
+	return snaker.SnakeToCamel(colInfo.ColumnName)
+}
+
+func (colInfo *ColumnInfo) ColumnType() string {
+	if colInfo.DataType == "text" {
+		return "string"
+	}
+	if colInfo.DataType == "integer" || colInfo.DataType == "numeric" {
+		return "int"
+	}
+	if colInfo.DataType == "timestamp with time zone" {
+		return "time.Time"
+	}
+	return ""
+}
+
+func migrationFromTemplate(r *render.Render, templateName string, file *file.File, data *viewBucket) error {
 	template := r.TemplateLookup(templateName)
 	buffer := bytes.NewBuffer(file.Content)
 	wr := bufio.NewWriter(buffer)

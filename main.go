@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"html/template"
 	"net"
 	"net/url"
 	"os"
@@ -43,8 +44,16 @@ func main() {
 			},
 		},
 		{
-			Name:    "migration",
+			Name:    "model",
 			Aliases: []string{"m"},
+			Usage:   "create a model from a table [tablename]",
+			Action: func(c *cli.Context) error {
+				return createModel(c, render, db)
+			},
+		},
+		{
+			Name:    "migration",
+			Aliases: []string{"mi"},
 			Usage:   "perform schema migration",
 			Action: func(c *cli.Context) error {
 				return doMigration(c, render, db)
@@ -110,7 +119,12 @@ type viewBucket struct {
 }
 
 func newViewBucket() *viewBucket {
-	return &viewBucket{Data: map[string]interface{}{}}
+	return &viewBucket{Data: map[string]interface{}{
+		"LTEqStr": template.HTML(`<=`),
+		"GTEqStr": template.HTML(`>=`),
+		"LTStr":   template.HTML(`<`),
+		"GTStr":   template.HTML(`>`),
+	}}
 }
 
 func (viewBucket *viewBucket) add(key string, value interface{}) {

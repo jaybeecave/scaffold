@@ -1,3 +1,2 @@
-{{tableName := .Data.TableName}}
-{{range $field := .Data.Fields}}" ALTER TABLE "{{tableName}}" DROP COLUMN IF EXISTS {{$field.FieldName}}" {{$field.FieldType}};{{end}}
+{{$tableName := .Data.TableName}}{{range $field := .Data.Fields}}ALTER TABLE "{{$tableName}}" DROP COLUMN IF EXISTS "{{$field.FieldName}}" {{$field.FieldType}};{{end}}
 
