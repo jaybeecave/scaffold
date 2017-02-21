@@ -121,6 +121,14 @@ func doMigration(c *cli.Context, r *render.Render, db *runner.DB) error {
 }
 
 func createModel(c *cli.Context, r *render.Render, db *runner.DB) error {
+	return createSomething(c, r, db, "create-model", "./models/")
+}
+
+func createRest(c *cli.Context, r *render.Render, db *runner.DB) error {
+	return createSomething(c, r, db, "create-rest", "./")
+}
+
+func createSomething(c *cli.Context, r *render.Render, db *runner.DB, tmpl string, path string) error {
 	bucket := newViewBucket()
 	args := c.Args()
 
@@ -153,7 +161,7 @@ func createModel(c *cli.Context, r *render.Render, db *runner.DB) error {
 		Where("table_schema = $1 and table_name = $2", "public", tableName).
 		QueryStructs(&columns)
 	if err != nil {
-		return cli.NewExitError(err.Error(), 1)
+		return cli.NewExitError("error 10: "+err.Error(), 1)
 	}
 	colsDBConcat := `"`
 	colsRecordPrefixedConcat := ""
@@ -174,9 +182,11 @@ func createModel(c *cli.Context, r *render.Render, db *runner.DB) error {
 	bucket.add("ColumnsRecordPrefixedStrings", colsRecordPrefixedConcat)
 
 	//
-	fo, _ := os.Create("./models/" + tableNameCamel + ".go.tmp")
+	fullpath := path + tableNameCamel + ".go.tmp"
 
-	template := r.TemplateLookup("create-model")
+	fo, _ := os.Create(fullpath)
+
+	template := r.TemplateLookup(tmpl)
 	wr := bufio.NewWriter(fo)
 	err = template.Execute(wr, bucket.Data)
 	if err != nil {
@@ -185,11 +195,11 @@ func createModel(c *cli.Context, r *render.Render, db *runner.DB) error {
 	wr.Flush()
 	// err = ioutil.WriteFile("./models/migrations/"+tableName+".go", buffer.Bytes(), os.ModePerm)
 	if err != nil {
-		return cli.NewExitError(err.Error(), 1)
+		return cli.NewExitError("error 20: "+err.Error(), 1)
 	}
 
 	if err := fo.Close(); err != nil {
-		return cli.NewExitError(err.Error(), 1)
+		return cli.NewExitError("error 30: "+err.Error(), 1)
 	}
 	return nil
 }

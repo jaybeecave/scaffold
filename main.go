@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"html/template"
 	"net"
 	"net/url"
@@ -49,6 +48,14 @@ func main() {
 			Usage:   "create a model from a table [tablename]",
 			Action: func(c *cli.Context) error {
 				return createModel(c, render, db)
+			},
+		},
+		{
+			Name:    "rest",
+			Aliases: []string{"r"},
+			Usage:   "create a restful interface from a table [tablename]",
+			Action: func(c *cli.Context) error {
+				return createRest(c, render, db)
 			},
 		},
 		{
@@ -158,7 +165,6 @@ func (viewBucket *viewBucket) addFieldDataFromContext(c *cli.Context) {
 
 	fields := Fields{}
 	for _, arg := range args {
-		fmt.Printf(arg)
 		if args.First() == arg {
 			continue // we dont care about the first arg as its the TableName
 		}
